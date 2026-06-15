@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <meta name="theme-color" content="#0E1117"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="NEET Tracker"/>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icon-192.png"/>
+  <title>NEET MCQ Tracker</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{min-height:100%;background:#0E1117;color:#E8EDF7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    input,select,button,textarea{font-family:inherit}
+    ::-webkit-scrollbar{width:4px}
+    ::-webkit-scrollbar-track{background:#0E1117}
+    ::-webkit-scrollbar-thumb{background:#252D3D;border-radius:4px}
+    .tab-scroll{display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:12px 0 4px;scrollbar-width:none}
+    .tab-scroll::-webkit-scrollbar{display:none}
+    body{padding-bottom:env(safe-area-inset-bottom)}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ═══════════════════════════════════════════════════════
+// MINI CHART LIBRARY (Canvas-based, no dependencies)
+// ═══════════════════════════════════════════════════════
+const Charts = {
+  colors: { accent:"#4F8EF7", green:"#3DD68C", red:"#F7614F", yellow:"#F5C542", purple:"#A78BFA", border:"#252D3D", muted:"#6B7A9F", card:"#1C2333", text:"#E8EDF7", subtext:"#9AA5C4" },
+
+  bar(canvas, data, keys, colors, opts={}) {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio||1;
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    canvas.width = W*dpr; canvas.height = H*dpr;
+    ctx.scale(dpr,dpr);
+    const pad = {t:10,r:10,b:40,l:36};
+    const cw = W-pad.l-pad.r, ch = H-pad.t-pad.b;
+    ctx.clearRect(0,0,W,H);
+    if(!data.length) return;
+    const maxVal = Math.max(...data.flatMap(d=>keys.map(k=>d[k]||0)),1);
+    const nGrid = 4;
+    ctx.strokeStyle='#252D3D'; ctx.lineWidth=1;
+    for(let i=0;i<=nGrid;i++){
+      const y=pad.t+ch-(ch*i/nGrid);
+      ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+cw,y);ctx.stroke();
+      ctx.fillStyle='#6B7A9F';ctx.font=`${10*dpr/dpr}px system-ui`;ctx.textAlign='right';
+      ctx.fillText(Math.round(maxVal*i/nGrid),pad.l-4,y+3);
+    }
+    const groupW = cw/data.length;
+    const barW = Math.min(groupW/(keys.length+1), 20);
+    data.forEach((d,i)=>{
+      keys.forEach((k,j)=>{
+        const val=d[k]||0;
+        const x=pad.l+i*groupW+(j-(keys.length-1)/2)*barW*1.2+groupW/2-barW/2;
+        const bh=Math.max((val/maxVal)*ch,0);
+        const y=pad.t+ch-bh;
+        ctx.fillStyle=colors[j];
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(x,y,barW,bh,3) : ctx.rect(x,y,barW,bh);
+        ctx.fill();
+      });
+      ctx.fillStyle='#6B7A9F';ctx.font='10px system-ui';ctx.textAlign='center';
+      ctx.fillText(d.label||'',pad.l+i*groupW+groupW/2,H-pad.b+14);
+    });
+    if(opts.legend){
+      let lx=pad.l; const ly=H-8;
+      opts.legend.forEach((l,i)=>{
+        ctx.fillStyle=colors[i];ctx.fillRect(lx,ly-8,10,8);
+        ctx.fillStyle='#9AA5C4';ctx.font='9px system-ui';ctx.textAlign='left';
+        ctx.fillText(l,lx+13,ly);lx+=ctx.measureText(l).width+28;
+      });
+    }
+  },
+
+  line(canvas, data, keys, colors, opts={}) {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio||1;
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    canvas.width=W*dpr;canvas.height=H*dpr;ctx.scale(dpr,dpr);
+    const pad={t:10,r:10,b:36,l:36};
+    const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+    ctx.clearRect(0,0,W,H);
+    if(!data.length) return;
+    const maxV=opts.maxY||Math.max(...data.flatMap(d=>keys.map(k=>d[k]||0)),1);
+    const minV=opts.minY||0;
+    const range=maxV-minV||1;
+    const nGrid=4;
+    ctx.strokeStyle='#252D3D';ctx.lineWidth=1;
+    for(let i=0;i<=nGrid;i++){
+      const y=pad.t+ch-(ch*i/nGrid);
+      ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+cw,y);ctx.stroke();
+      ctx.fillStyle='#6B7A9F';ctx.font='10px system-ui';ctx.textAlign='right';
+      const val=minV+range*i/nGrid;
+      ctx.fillText(Math.round(val)+(opts.unit||''),pad.l-4,y+3);
+    }
+    const xStep=data.length>1?cw/(data.length-1):cw/2;
+    keys.forEach((k,ki)=>{
+      ctx.strokeStyle=colors[ki];ctx.lineWidth=2.5;
+      ctx.setLineDash(ki>0?[5,3]:[]);
+      ctx.beginPath();
+      data.forEach((d,i)=>{
+        const x=pad.l+(data.length>1?i*xStep:cw/2);
+        const y=pad.t+ch-((( d[k]||0)-minV)/range)*ch;
+        i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+      });
+      ctx.stroke();ctx.setLineDash([]);
+      data.forEach((d,i)=>{
+        const x=pad.l+(data.length>1?i*xStep:cw/2);
+        const y=pad.t+ch-(((d[k]||0)-minV)/range)*ch;
+        ctx.fillStyle=colors[ki];ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();
+      });
+    });
+    data.forEach((d,i)=>{
+      const x=pad.l+(data.length>1?i*xStep:cw/2);
+      ctx.fillStyle='#6B7A9F';ctx.font='10px system-ui';ctx.textAlign='center';
+      ctx.fillText(d.label||'',x,H-pad.b+13);
+    });
+    if(opts.legend){
+      let lx=pad.l;const ly=H-4;
+      opts.legend.forEach((l,i)=>{
+        ctx.strokeStyle=colors[i];ctx.lineWidth=2;
+        ctx.setLineDash(i>0?[4,2]:[]);
+        ctx.beginPath();ctx.moveTo(lx,ly-4);ctx.lineTo(lx+14,ly-4);ctx.stroke();ctx.setLineDash([]);
+        ctx.fillStyle='#9AA5C4';ctx.font='9px system-ui';ctx.textAlign='left';
+        ctx.fillText(l,lx+17,ly);lx+=ctx.measureText(l).width+34;
+      });
+    }
+  },
+
+  donut(canvas, data, colors) {
+    const ctx=canvas.getContext('2d');
+    const dpr=window.devicePixelRatio||1;
+    const W=canvas.offsetWidth,H=canvas.offsetHeight;
+    canvas.width=W*dpr;canvas.height=H*dpr;ctx.scale(dpr,dpr);
+    ctx.clearRect(0,0,W,H);
+    const total=data.reduce((a,d)=>a+d.value,0);
+    if(!total)return;
+    const cx=W/2,cy=H*0.46,r=Math.min(W,H)*0.36,inner=r*0.55;
+    let angle=-Math.PI/2;
+    data.forEach((d,i)=>{
+      const slice=(d.value/total)*Math.PI*2;
+      ctx.fillStyle=colors[i];
+      ctx.beginPath();ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,angle,angle+slice);ctx.closePath();ctx.fill();
+      // label
+      const mid=angle+slice/2;
+      const lx=cx+Math.cos(mid)*(r*0.72),ly=cy+Math.sin(mid)*(r*0.72);
+      ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(9,r*0.18)}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(Math.round(d.value/total*100)+'%',lx,ly);
+      angle+=slice;
+    });
+    ctx.fillStyle='#1C2333';ctx.beginPath();ctx.arc(cx,cy,inner,0,Math.PI*2);ctx.fill();
+    // legend
+    const lh=H*0.88, startX=(W-data.reduce((a,d)=>a+ctx.measureText(d.name).width+22,0))/2;
+    let lx=Math.max(8,startX);
+    data.forEach((d,i)=>{
+      ctx.fillStyle=colors[i];ctx.beginPath();ctx.arc(lx+5,lh,5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#9AA5C4';ctx.font='10px system-ui';ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.fillText(d.name,lx+13,lh);
+      lx+=ctx.measureText(d.name).width+26;
+    });
+  },
+
+  hbar(canvas, data, colors) {
+    const ctx=canvas.getContext('2d');
+    const dpr=window.devicePixelRatio||1;
+    const W=canvas.offsetWidth,H=canvas.offsetHeight;
+    canvas.width=W*dpr;canvas.height=H*dpr;ctx.scale(dpr,dpr);
+    ctx.clearRect(0,0,W,H);
+    if(!data.length)return;
+    const pad={t:8,r:40,b:8,l:76};
+    const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+    const bh=Math.min(28,(ch/data.length)*0.6);
+    const gap=(ch/data.length);
+    data.forEach((d,i)=>{
+      const y=pad.t+i*gap+(gap-bh)/2;
+      ctx.fillStyle='#252D3D';
+      ctx.beginPath();ctx.roundRect?ctx.roundRect(pad.l,y,cw,bh,4):ctx.rect(pad.l,y,cw,bh);ctx.fill();
+      const fw=Math.max((d.accuracy/100)*cw,0);
+      ctx.fillStyle=colors[i]||'#4F8EF7';
+      ctx.beginPath();ctx.roundRect?ctx.roundRect(pad.l,y,fw,bh,4):ctx.rect(pad.l,y,fw,bh);ctx.fill();
+      ctx.fillStyle='#E8EDF7';ctx.font='bold 11px system-ui';ctx.textAlign='right';ctx.textBaseline='middle';
+      ctx.fillText(d.name,pad.l-8,y+bh/2);
+      ctx.fillStyle='#E8EDF7';ctx.font='bold 11px system-ui';ctx.textAlign='left';
+      ctx.fillText(d.accuracy+'%',pad.l+fw+6,y+bh/2);
+    });
+  }
+};
+
+// ═══════════════════════════════════════════════════════
+// STATE & STORAGE
+// ═══════════════════════════════════════════════════════
+const ENTRY_KEY='neet_mcq_v1', MOCK_KEY='neet_mock_v1';
+let entries=[], mocks=[], currentTab='log', editEntryId=null, editMockId=null, expandMockId=null, confirmDelEntry=null, confirmDelMock=null;
+
+function load(){
+  try{entries=JSON.parse(localStorage.getItem(ENTRY_KEY))||[];}catch{entries=[];}
+  try{mocks=JSON.parse(localStorage.getItem(MOCK_KEY))||[];}catch{mocks=[];}
+}
+function save(){
+  localStorage.setItem(ENTRY_KEY,JSON.stringify(entries));
+  localStorage.setItem(MOCK_KEY,JSON.stringify(mocks));
+}
+load();
+
+// ═══════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════
+const SUBJ=['Physics','Chemistry','Biology'];
+const SCOL={Physics:'#4F8EF7',Chemistry:'#A78BFA',Biology:'#3DD68C'};
+function today(){return new Date().toISOString().slice(0,10);}
+function acc(c,t){return t?Math.round(c/t*100):0;}
+function fmtDur(m){if(!m)return'—';const h=Math.floor(m/60),mn=m%60;return h?`${h}h ${mn}m`:`${mn}m`;}
+function weekKey(d){const dt=new Date(d),day=dt.getDay();dt.setDate(dt.getDate()-day+(day===0?-6:1));return dt.toISOString().slice(0,10);}
+function monthKey(d){return d.slice(0,7);}
+function groupEntries(keyFn){
+  const map={};
+  entries.forEach(e=>{
+    const k=keyFn(e.date);
+    if(!map[k])map[k]={key:k,total:0,correct:0,wrong:0};
+    map[k].total+=e.total;map[k].correct+=e.total-e.wrong;map[k].wrong+=e.wrong;
+  });
+  return Object.values(map).sort((a,b)=>a.key.localeCompare(b.key)).map(d=>({...d,accuracy:acc(d.correct,d.total)}));
+}
+function shortKey(k,mode){
+  if(mode==='weekly')return'W'+k.slice(5);
+  if(mode==='monthly')return k.slice(0,7);
+  return k.slice(5);
+}
+function mockStats(m){
+  const subs=SUBJ.map(s=>{const sl=s.toLowerCase();const t=m[sl].total,c=t-m[sl].wrong;return{subject:s,total:t,correct:c,wrong:m[sl].wrong,accuracy:acc(c,t)};});
+  const total=subs.reduce((a,s)=>a+s.total,0),correct=subs.reduce((a,s)=>a+s.correct,0);
+  return{subs,total,correct,wrong:total-correct,accuracy:acc(correct,total)};
+}
+
+// ═══════════════════════════════════════════════════════
+// DOM HELPERS
+// ═══════════════════════════════════════════════════════
+function el(tag,attrs={},children=[]){
+  const e=document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v])=>{
+    if(k==='style'&&typeof v==='object')Object.assign(e.style,v);
+    else if(k.startsWith('on'))e.addEventListener(k.slice(2).toLowerCase(),v);
+    else if(k==='className')e.className=v;
+    else e.setAttribute(k,v);
+  });
+  children.forEach(c=>{if(c!=null&&c!==false&&c!==undefined)e.appendChild(typeof c==='string'?document.createTextNode(c):c);});
+  return e;
+}
+function div(style,children=[]){return el('div',{style},children);}
+function span(style,text){return el('span',{style},[text]);}
+function btn(text,style,onClick){return el('button',{style,onClick},[text]);}
+
+const C={bg:'#0E1117',surface:'#161B27',card:'#1C2333',border:'#252D3D',accent:'#4F8EF7',green:'#3DD68C',red:'#F7614F',yellow:'#F5C542',purple:'#A78BFA',muted:'#6B7A9F',text:'#E8EDF7',subtext:'#9AA5C4'};
+const inp={background:C.surface,border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',color:C.text,fontSize:'15px',width:'100%'};
+
+function statCard(label,value,color,sub){
+  return div({background:C.card,border:`1px solid ${C.border}`,borderRadius:'12px',padding:'16px 18px',borderTop:`3px solid ${color||C.accent}`},[
+    div({fontSize:'10px',color:C.muted,letterSpacing:'1px',textTransform:'uppercase',marginBottom:'4px'},[label]),
+    div({fontSize:'26px',fontWeight:'700',color:color||C.text},[String(value)]),
+    sub?div({fontSize:'11px',color:C.subtext,marginTop:'2px'},[sub]):null
+  ].filter(Boolean));
+}
+function secHead(title){
+  return div({display:'flex',alignItems:'center',gap:'10px',margin:'24px 0 12px'},[
+    div({width:'4px',height:'18px',borderRadius:'2px',background:C.accent},[]),
+    span({fontSize:'12px',fontWeight:'700',color:C.subtext,letterSpacing:'1px',textTransform:'uppercase'},title)
+  ]);
+}
+function tabBtn(label,active,onClick){
+  return btn(label,{padding:'8px 14px',borderRadius:'8px',border:'none',cursor:'pointer',fontWeight:'600',fontSize:'12px',whiteSpace:'nowrap',background:active?C.accent:'transparent',color:active?'#fff':C.subtext},onClick);
+}
+function inputEl(type,value,onChange,placeholder='',min){
+  const i=el('input',{type,value,placeholder,style:inp});
+  if(min!==undefined)i.setAttribute('min',min);
+  i.addEventListener('input',e=>onChange(e.target.value));
+  return i;
+}
+function selectEl(value,options,onChange){
+  const s=el('select',{style:inp});
+  options.forEach(o=>{const op=el('option',{},[o]);if(o===value)op.selected=true;s.appendChild(op);});
+  s.addEventListener('change',e=>onChange(e.target.value));
+  return s;
+}
+function canvasChart(h,drawFn){
+  const c=el('canvas',{style:{width:'100%',height:h+'px',display:'block'}});
+  c.style.height=h+'px';
+  requestAnimationFrame(()=>{c.style.width='100%';drawFn(c);});
+  // redraw on resize
+  const ro=new ResizeObserver(()=>drawFn(c));ro.observe(c);
+  return c;
+}
+function fieldRow(label,input){
+  return div({display:'flex',flexDirection:'column',gap:'5px'},[
+    el('label',{style:{fontSize:'10px',color:C.muted,letterSpacing:'0.8px',textTransform:'uppercase'}},[label]),
+    input
+  ]);
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER CHARTS SECTION (shared between daily/weekly/monthly)
+// ═══════════════════════════════════════════════════════
+function renderTrendCharts(data,mode){
+  if(!data.length) return div({textAlign:'center',color:C.muted,padding:'60px 0',fontSize:'14px'},['No data yet — start logging sessions!']);
+  const cd=data.map(d=>({...d,label:shortKey(d.key,mode)}));
+  return div({},[
+    secHead('Attempted vs Correct vs Wrong'),
+    div({background:C.card,borderRadius:'12px',padding:'16px 8px 8px',border:`1px solid ${C.border}`},[
+      canvasChart(210,c=>Charts.bar(c,cd,['total','correct','wrong'],[C.accent,C.green,C.red],{legend:['Attempted','Correct','Wrong']}))
+    ]),
+    secHead('Accuracy Trend'),
+    div({background:C.card,borderRadius:'12px',padding:'16px 8px 8px',border:`1px solid ${C.border}`},[
+      canvasChart(190,c=>Charts.line(c,cd,['accuracy'],[C.yellow],{maxY:100,minY:0,unit:'%'}))
+    ])
+  ]);
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER FUNCTIONS
+// ═══════════════════════════════════════════════════════
+function renderHeader(){
+  const todayE=entries.filter(e=>e.date===today());
+  const tt=todayE.reduce((s,e)=>s+e.total,0);
+  const tw=todayE.reduce((s,e)=>s+e.wrong,0);
+  const ta=tt?acc(tt-tw,tt):0;
+  return div({background:C.surface,borderBottom:`1px solid ${C.border}`,padding:'14px 16px',position:'sticky',top:'0',zIndex:'10'},[
+    div({maxWidth:'600px',margin:'0 auto',display:'flex',justifyContent:'space-between',alignItems:'center'},[
+      div({},[
+        div({fontSize:'17px',fontWeight:'700'},[
+          span({color:C.accent},'NEET'),' MCQ Tracker'
+        ]),
+        div({fontSize:'11px',color:C.muted},['Practice · Mock Tests · Analysis'])
+      ]),
+      div({textAlign:'right'},[
+        div({fontSize:'10px',color:C.muted},['Today']),
+        div({fontSize:'20px',fontWeight:'700',color:C.yellow},[tt+' Qs']),
+        div({fontSize:'11px',color:tt&&ta>=70?C.green:C.red},[tt?ta+'% acc':'—'])
+      ])
+    ])
+  ]);
+}
+
+function renderTabs(){
+  const tabs=[['log','Log Session'],['mock','Mock Tests'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']];
+  return div({display:'flex',gap:'4px',padding:'12px 0 4px',overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'},[
+    ...tabs.map(([k,l])=>tabBtn(l,currentTab===k,()=>{currentTab=k;render();}))
+  ]);
+}
+
+// ── LOG TAB ──────────────────────────────────────────────────────────────────
+let logForm={date:today(),subject:'Physics',total:'',wrong:''};
+let logSaved=false;
+
+function renderLogTab(){
+  const allTotal=entries.reduce((s,e)=>s+e.total,0);
+  const allCorrect=entries.reduce((s,e)=>s+e.total-e.wrong,0);
+  const allWrong=allTotal-allCorrect;
+  const allAcc=acc(allCorrect,allTotal);
+
+  const previewTotal=parseInt(logForm.total)||0;
+  const previewWrong=parseInt(logForm.wrong)||0;
+  const previewCorrect=previewTotal-previewWrong;
+  const previewAcc=acc(previewCorrect,previewTotal);
+
+  // subject pie
+  const subMap={};
+  entries.forEach(e=>{subMap[e.subject]=(subMap[e.subject]||0)+e.total;});
+  const pieData=Object.entries(subMap).map(([name,value])=>({name,value}));
+
+  const saveEntry=()=>{
+    const t=parseInt(logForm.total),w=parseInt(logForm.wrong);
+    if(!t||isNaN(w)||w<0||w>t)return;
+    const entry={id:editEntryId||Date.now(),date:logForm.date,subject:logForm.subject,total:t,wrong:w};
+    if(editEntryId){entries=entries.map(e=>e.id===editEntryId?entry:e);editEntryId=null;}
+    else entries.push(entry);
+    save();logForm={...logForm,total:'',wrong:''};logSaved=true;render();
+    setTimeout(()=>{logSaved=false;render();},1500);
+  };
+
+  return div({},[
+    // Form
+    div({background:C.card,border:`1px solid ${C.border}`,borderRadius:'14px',padding:'18px 16px 14px',marginTop:'10px'},[
+      div({fontSize:'13px',fontWeight:'600',color:C.subtext,marginBottom:'14px'},[editEntryId?'✏️ Edit Entry':'➕ Log Practice Session']),
+      div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'},[
+        fieldRow('Date',inputEl('date',logForm.date,v=>{logForm.date=v;render();})),
+        fieldRow('Subject',selectEl(logForm.subject,SUBJ,v=>{logForm.subject=v;render();})),
+        fieldRow('Questions Attempted',inputEl('number',logForm.total,v=>{logForm.total=v;render();},'0',0)),
+        fieldRow('Wrong Answers',inputEl('number',logForm.wrong,v=>{logForm.wrong=v;render();},'0',0)),
+      ]),
+      previewTotal>0?div({marginTop:'10px',fontSize:'13px',color:C.subtext},[
+        'Correct: ',el('b',{style:{color:C.green}},[String(previewCorrect)]),
+        '   Accuracy: ',el('b',{style:{color:C.yellow}},[previewAcc+'%'])
+      ]):null,
+      div({display:'flex',gap:'8px',marginTop:'14px'},[
+        btn(logSaved?'✓ Saved!':editEntryId?'Update Entry':'Save Session',{background:C.accent,color:'#fff',border:'none',borderRadius:'9px',padding:'12px 0',fontWeight:'700',fontSize:'15px',cursor:'pointer',flex:'1'},saveEntry),
+        editEntryId?btn('Cancel',{background:C.surface,color:C.subtext,border:`1px solid ${C.border}`,borderRadius:'9px',padding:'12px 16px',cursor:'pointer',fontSize:'14px'},()=>{editEntryId=null;logForm={...logForm,total:'',wrong:''};render();}):null
+      ].filter(Boolean))
+    ]),
+    // All-time stats
+    secHead('All-Time Stats'),
+    div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'},[
+      statCard('Total Attempted',allTotal,C.accent),
+      statCard('Overall Accuracy',allAcc+'%',allAcc>=70?C.green:C.red),
+      statCard('Correct',allCorrect,C.green),
+      statCard('Wrong',allWrong,C.red),
+    ]),
+    // Pie
+    pieData.length?div({},[
+      secHead('Subject Distribution'),
+      div({background:C.card,borderRadius:'12px',padding:'16px',border:`1px solid ${C.border}`},[
+        canvasChart(200,c=>Charts.donut(c,pieData,pieData.map(d=>SCOL[d.name])))
+      ])
+    ]):null,
+    // Recent sessions
+    entries.length?div({},[
+      secHead('Recent Sessions'),
+      div({display:'flex',flexDirection:'column',gap:'8px'},[
+        ...[...entries].reverse().slice(0,25).map(e=>{
+          const a=acc(e.total-e.wrong,e.total);
+          return div({background:C.card,border:`1px solid ${C.border}`,borderRadius:'10px',padding:'12px 14px',display:'flex',alignItems:'center',gap:'10px'},[
+            div({width:'10px',height:'10px',borderRadius:'50%',background:SCOL[e.subject],flexShrink:'0'},[]),
+            div({flex:'1',minWidth:'0'},[
+              div({fontSize:'13px',fontWeight:'600'},[e.subject,span({color:C.subtext,fontWeight:'400'},' · '+e.date)]),
+              div({fontSize:'12px',color:C.subtext,marginTop:'2px'},[`${e.total} Q · ✓ ${e.total-e.wrong} · ✗ ${e.wrong}`])
+            ]),
+            div({fontSize:'15px',fontWeight:'700',color:a>=70?C.green:C.red,minWidth:'40px',textAlign:'right'},[a+'%']),
+            btn('✏️',{background:'none',border:'none',cursor:'pointer',fontSize:'16px',padding:'4px 6px',color:C.muted},()=>{
+              editEntryId=e.id;logForm={date:e.date,subject:e.subject,total:String(e.total),wrong:String(e.wrong)};render();window.scrollTo({top:0,behavior:'smooth'});
+            }),
+            confirmDelEntry===e.id
+              ?btn('Sure?',{background:C.red,color:'#fff',border:'none',borderRadius:'6px',padding:'4px 8px',cursor:'pointer',fontSize:'11px',fontWeight:'700'},()=>{entries=entries.filter(x=>x.id!==e.id);save();confirmDelEntry=null;render();})
+              :btn('✕',{background:'none',border:'none',cursor:'pointer',color:C.red,fontSize:'16px',padding:'4px 6px'},()=>{confirmDelEntry=e.id;render();})
+          ]);
+        })
+      ])
+    ]):null
+  ].filter(Boolean));
+}
+
+// ── MOCK TEST TAB ─────────────────────────────────────────────────────────────
+let mockForm={name:'',date:today(),duration:'',physics:{total:'',wrong:''},chemistry:{total:'',wrong:''},biology:{total:'',wrong:''}};
+let mockSaved=false;
+
+function resetMockForm(){mockForm={name:'',date:today(),duration:'',physics:{total:'',wrong:''},chemistry:{total:'',wrong:''},biology:{total:'',wrong:''}};}
+
+function renderMockTab(){
+  const saveMock=()=>{
+    for(const s of['physics','chemistry','biology']){
+      const t=parseInt(mockForm[s].total),w=parseInt(mockForm[s].wrong);
+      if(!t||isNaN(w)||w<0||w>t)return;
+    }
+    const m={
+      id:editMockId||Date.now(),
+      name:mockForm.name||`Mock Test ${mocks.length+1}`,
+      date:mockForm.date,
+      duration:parseInt(mockForm.duration)||0,
+      physics:{total:parseInt(mockForm.physics.total),wrong:parseInt(mockForm.physics.wrong)},
+      chemistry:{total:parseInt(mockForm.chemistry.total),wrong:parseInt(mockForm.chemistry.wrong)},
+      biology:{total:parseInt(mockForm.biology.total),wrong:parseInt(mockForm.biology.wrong)},
+    };
+    if(editMockId){mocks=mocks.map(x=>x.id===editMockId?m:x);editMockId=null;}
+    else mocks.push(m);
+    save();resetMockForm();mockSaved=true;render();
+    setTimeout(()=>{mockSaved=false;render();},1500);
+  };
+
+  const subjectTotals=SUBJ.map(s=>{
+    const sl=s.toLowerCase();
+    const total=mocks.reduce((a,m)=>a+m[sl].total,0);
+    const correct=mocks.reduce((a,m)=>a+m[sl].total-m[sl].wrong,0);
+    return{name:s,total,correct,accuracy:acc(correct,total)};
+  });
+
+  const trendsData=[...mocks].sort((a,b)=>a.date.localeCompare(b.date)).map((m,i)=>{
+    const s=mockStats(m);
+    return{
+      label:m.date.slice(5),
+      accuracy:s.accuracy,
+      physics:acc(m.physics.total-m.physics.wrong,m.physics.total),
+      chemistry:acc(m.chemistry.total-m.chemistry.wrong,m.chemistry.total),
+      biology:acc(m.biology.total-m.biology.wrong,m.biology.total),
+    };
+  });
+
+  const bestMock=mocks.length?mocks.reduce((b,m)=>mockStats(m).accuracy>mockStats(b).accuracy?m:b):null;
+
+  return div({},[
+    // ── Form ──
+    div({background:C.card,border:`1px solid ${C.border}`,borderRadius:'14px',padding:'18px 16px 14px',marginTop:'10px'},[
+      div({fontSize:'13px',fontWeight:'600',color:C.subtext,marginBottom:'14px'},[editMockId?'✏️ Edit Mock Test':'📝 Log Mock Test']),
+      // name
+      fieldRow('Test Name (optional)',inputEl('text',mockForm.name,v=>{mockForm.name=v;},'e.g. Allen Major Test 3')),
+      div({height:'10px'},[]),
+      div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'10px'},[
+        fieldRow('Date',inputEl('date',mockForm.date,v=>{mockForm.date=v;render();})),
+        fieldRow('Duration (mins)',inputEl('number',mockForm.duration,v=>{mockForm.duration=v;},'e.g. 200',0)),
+      ]),
+      // Subject rows
+      div({display:'flex',flexDirection:'column',gap:'8px'},[
+        ...SUBJ.map(s=>{
+          const sl=s.toLowerCase();
+          const t=parseInt(mockForm[sl].total)||0,w=parseInt(mockForm[sl].wrong)||0;
+          const a=acc(t-w,t);
+          return div({background:C.surface,border:`1px solid ${C.border}`,borderRadius:'10px',padding:'12px 12px 10px'},[
+            div({display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'},[
+              div({width:'8px',height:'8px',borderRadius:'50%',background:SCOL[s]},[]),
+              span({fontSize:'13px',fontWeight:'600',color:SCOL[s]},s),
+              t>0?span({marginLeft:'auto',fontSize:'12px',color:a>=70?C.green:a>=50?C.yellow:C.red,fontWeight:'700'},a+'%'):null
+            ].filter(Boolean)),
+            div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'},[
+              fieldRow('Attempted',inputEl('number',mockForm[sl].total,v=>{mockForm[sl].total=v;render();},'0',0)),
+              fieldRow('Wrong',inputEl('number',mockForm[sl].wrong,v=>{mockForm[sl].wrong=v;render();},'0',0)),
+            ])
+          ]);
+        })
+      ]),
+      div({display:'flex',gap:'8px',marginTop:'14px'},[
+        btn(mockSaved?'✓ Saved!':editMockId?'Update Test':'Save Mock Test',{background:C.accent,color:'#fff',border:'none',borderRadius:'9px',padding:'12px 0',fontWeight:'700',fontSize:'15px',cursor:'pointer',flex:'1'},saveMock),
+        editMockId?btn('Cancel',{background:C.surface,color:C.subtext,border:`1px solid ${C.border}`,borderRadius:'9px',padding:'12px 16px',cursor:'pointer',fontSize:'14px'},()=>{editMockId=null;resetMockForm();render();}):null
+      ].filter(Boolean))
+    ]),
+
+    // ── Summary (only if tests exist) ──
+    mocks.length?div({},[
+      secHead('All Mock Tests Summary'),
+      div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'},[
+        statCard('Tests Taken',mocks.length,C.accent),
+        bestMock?statCard('Best Accuracy',mockStats(bestMock).accuracy+'%',C.green,bestMock.name):null,
+        ...subjectTotals.map(st=>statCard(st.name+' Avg Acc',st.accuracy+'%',SCOL[st.name]))
+      ].filter(Boolean)),
+
+      secHead('Subject-wise Accuracy (All Tests)'),
+      div({background:C.card,borderRadius:'12px',padding:'16px 8px',border:`1px solid ${C.border}`},[
+        canvasChart(160,c=>Charts.hbar(c,subjectTotals,[C.accent,C.purple,C.green]))
+      ]),
+
+      mocks.length>1?div({},[
+        secHead('Accuracy Trends Across Tests'),
+        div({background:C.card,borderRadius:'12px',padding:'16px 8px',border:`1px solid ${C.border}`},[
+          canvasChart(210,c=>Charts.line(c,trendsData,['accuracy','physics','chemistry','biology'],
+            [C.yellow,C.accent,C.purple,C.green],
+            {maxY:100,minY:0,unit:'%',legend:['Overall','Physics','Chemistry','Biology']}))
+        ])
+      ]):null,
+
+      secHead('Test History'),
+      div({display:'flex',flexDirection:'column',gap:'10px'},[
+        ...[...mocks].reverse().map(mock=>{
+          const ms=mockStats(mock);
+          const isOpen=expandMockId===mock.id;
+          return div({background:C.card,border:`1px solid ${C.border}`,borderRadius:'12px',overflow:'hidden'},[
+            // Header
+            div({padding:'14px 14px 12px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',onClick:()=>{expandMockId=isOpen?null:mock.id;render();}},[ 
+              div({flex:'1',minWidth:'0'},[
+                div({fontSize:'14px',fontWeight:'700',color:C.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'},[mock.name]),
+                div({fontSize:'11px',color:C.subtext,marginTop:'2px',display:'flex',gap:'10px',flexWrap:'wrap'},[
+                  span({},'📅 '+mock.date),
+                  mock.duration?span({},'⏱ '+fmtDur(mock.duration)):null,
+                  span({},'📊 '+ms.total+' Qs')
+                ].filter(Boolean))
+              ]),
+              div({textAlign:'right',flexShrink:'0'},[
+                div({fontSize:'20px',fontWeight:'800',color:ms.accuracy>=70?C.green:ms.accuracy>=50?C.yellow:C.red},[ms.accuracy+'%']),
+                div({fontSize:'10px',color:C.subtext},['overall'])
+              ]),
+              span({color:C.muted,fontSize:'14px',marginLeft:'4px'},isOpen?'▲':'▼')
+            ].filter(Boolean)),
+
+            // Expanded
+            isOpen?div({borderTop:`1px solid ${C.border}`,padding:'14px 14px 16px'},[
+              // Subject cards
+              div({display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px',marginBottom:'16px'},[
+                ...SUBJ.map(s=>{
+                  const sl=s.toLowerCase();
+                  const t=mock[sl].total,c=t-mock[sl].wrong,a=acc(c,t);
+                  return div({background:C.surface,borderRadius:'10px',padding:'10px 8px 8px',borderTop:`3px solid ${SCOL[s]}`},[
+                    div({fontSize:'10px',color:SCOL[s],fontWeight:'700',marginBottom:'4px',letterSpacing:'0.5px'},[s.slice(0,3).toUpperCase()]),
+                    div({fontSize:'18px',fontWeight:'800',color:a>=70?C.green:a>=50?C.yellow:C.red},[a+'%']),
+                    div({fontSize:'10px',color:C.subtext,marginTop:'2px'},[`✓${c} ✗${mock[sl].wrong}/${t}`])
+                  ]);
+                })
+              ]),
+              // Stats + Pie
+              div({display:'flex',gap:'12px',alignItems:'flex-start',flexWrap:'wrap'},[
+                div({flex:'1',minWidth:'130px'},[
+                  div({display:'flex',flexDirection:'column',gap:'0'},[
+                    ...[['Total Qs',ms.total,C.accent],['Correct',ms.correct,C.green],['Wrong',ms.wrong,C.red],
+                        ['Accuracy',ms.accuracy+'%',ms.accuracy>=70?C.green:C.red],['Duration',fmtDur(mock.duration),C.yellow]]
+                    .map(([l,v,col])=>div({display:'flex',justifyContent:'space-between',fontSize:'12px',padding:'6px 0',borderBottom:`1px solid ${C.border}`},[
+                      span({color:C.subtext},l),
+                      span({color:col,fontWeight:'700'},String(v))
+                    ]))
+                  ])
+                ]),
+                div({width:'130px'},[
+                  canvasChart(130,c=>Charts.donut(c,SUBJ.map(s=>({name:s.slice(0,3),value:mock[s.toLowerCase()].total})),Object.values(SCOL)))
+                ])
+              ]),
+              // Actions
+              div({display:'flex',gap:'8px',marginTop:'14px'},[
+                btn('✏️ Edit',{flex:'1',background:C.surface,color:C.subtext,border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 0',cursor:'pointer',fontSize:'13px',fontWeight:'600'},()=>{
+                  editMockId=mock.id;
+                  mockForm={name:mock.name,date:mock.date,duration:String(mock.duration||''),
+                    physics:{total:String(mock.physics.total),wrong:String(mock.physics.wrong)},
+                    chemistry:{total:String(mock.chemistry.total),wrong:String(mock.chemistry.wrong)},
+                    biology:{total:String(mock.biology.total),wrong:String(mock.biology.wrong)}};
+                  render();window.scrollTo({top:0,behavior:'smooth'});
+                }),
+                confirmDelMock===mock.id
+                  ?btn('Confirm Delete',{flex:'1',background:C.red,color:'#fff',border:'none',borderRadius:'8px',padding:'9px 0',cursor:'pointer',fontSize:'13px',fontWeight:'700'},()=>{mocks=mocks.filter(x=>x.id!==mock.id);save();confirmDelMock=null;expandMockId=null;render();})
+                  :btn('🗑 Delete',{flex:'1',background:'transparent',color:C.red,border:`1px solid ${C.red}`,borderRadius:'8px',padding:'9px 0',cursor:'pointer',fontSize:'13px',fontWeight:'600'},()=>{confirmDelMock=mock.id;render();})
+              ])
+            ]):null
+          ].filter(Boolean));
+        })
+      ])
+    ]):div({textAlign:'center',color:C.muted,padding:'50px 0',fontSize:'14px'},['No mock tests yet. Fill the form above!'])
+  ].filter(Boolean));
+}
+
+// ═══════════════════════════════════════════════════════
+// MAIN RENDER
+// ═══════════════════════════════════════════════════════
+function render(){
+  const app=document.getElementById('app');
+  app.innerHTML='';
+
+  const daily=groupEntries(d=>d);
+  const weekly=groupEntries(weekKey);
+  const monthly=groupEntries(monthKey);
+
+  let content;
+  if(currentTab==='log') content=renderLogTab();
+  else if(currentTab==='mock') content=renderMockTab();
+  else if(currentTab==='daily') content=div({},[
+    secHead('Daily Overview'),
+    div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'},[
+      statCard('Days Logged',daily.length,C.accent),
+      statCard('Best Day Acc',daily.length?Math.max(...daily.map(d=>d.accuracy))+'%':'—',C.green)
+    ]),
+    renderTrendCharts(daily,'daily')
+  ]);
+  else if(currentTab==='weekly') content=div({},[
+    secHead('Weekly Overview'),
+    div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'},[
+      statCard('Weeks Active',weekly.length,C.accent),
+      statCard('Best Week Acc',weekly.length?Math.max(...weekly.map(d=>d.accuracy))+'%':'—',C.green)
+    ]),
+    renderTrendCharts(weekly,'weekly')
+  ]);
+  else if(currentTab==='monthly') content=div({},[
+    secHead('Monthly Overview'),
+    div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'},[
+      statCard('Months Active',monthly.length,C.accent),
+      statCard('Best Month Acc',monthly.length?Math.max(...monthly.map(d=>d.accuracy))+'%':'—',C.green)
+    ]),
+    renderTrendCharts(monthly,'monthly')
+  ]);
+
+  app.appendChild(renderHeader());
+  const wrap=div({maxWidth:'600px',margin:'0 auto',padding:'0 14px 80px'},[renderTabs(),content]);
+  app.appendChild(wrap);
+}
+
+render();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
